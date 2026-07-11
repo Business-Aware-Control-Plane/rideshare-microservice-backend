@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -36,6 +37,18 @@ func NewRabbitMQ(uri string) (*RabbitMQ, error) {
 	}
 
 	return rmq, nil
+}
+
+func (r *RabbitMQ) PublishMessage(ctx context.Context, routingKey string, message string) error {
+	return r.Channel.PublishWithContext(ctx,
+		"",      // exchange
+		"hello", // routing key
+		false,   // mandatory
+		false,   // immediate
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(message),
+		})
 }
 
 func (r *RabbitMQ) setupExchangesAndQueues() error {
