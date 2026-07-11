@@ -63,3 +63,78 @@ func (s *service) GetRoute(ctx context.Context, pickup, destination *types.Coord
 
 	return &routeResp, nil
 }
+
+func (s *service) EstimatePackagesPriceWithRoute(route *tripTypes.OsrmApiResponse) []*domain.RideFareModel {
+	baseFares := getBaseFares()
+	estimatedFares := make([]*domain.RideFareModel, len(baseFares))
+
+	for i, f := range baseFares {
+		estimatedFares[i] = estimatedFareRoute(f, route)
+	}
+
+	return estimatedFares
+}
+
+func (s *service) GenerateTripFares(ctx context.Context, rideFares []*domain.RideFareModel, userID string) ([]*domain.RideFareModel, error) {
+	fares := make([]*domain.RideFareModel, len(rideFares))
+
+	for i, fare := range rideFares {
+		id := primitive.NewObjectID()
+
+		fare := &domain.RideFareModel{
+			UserID:            userID,
+			ID:                id,
+			TotalPriceInCents: fare.TotalPriceInCents,
+			PackageSlug:       fare.PackageSlug,
+		}
+
+		if err := s.repo.SaveRideFare(ctx, fare); err != nil {
+			return nil, fmt.Errorf("Failed to save trip fares: %v", err)
+		}
+
+		fares[i] = fare
+	}
+
+	return fares, nil
+}
+
+func estimatedFareRoute(f *domain.RideFareModel, route *tripTypes.OsrmApiResponse) *domain.RideFareModel {
+	pricingCfg := tripTypes.DefaultPricingConfig()
+	carPackagePrice := f.TotalPriceInCents
+
+	distanceKm := route.Routes[0].Distance
+	durationInMinutes := route.Routes[0].Duration
+
+	// distance
+	distanceFare := distanceKm * pricingCfg.PricePerKm
+	// time
+	timeFare := durationInMinutes * pricingCfg.PricingPerMinute
+	// car price
+	totalPrice := carPackagePrice + distanceFare + timeFare
+
+	return &domain.RideFareModel{
+		TotalPriceInCents: totalPrice,
+		PackageSlug:       f.PackageSlug,
+	}
+}
+
+func getBaseFares() []*domain.RideFareModel {
+	return []*domain.RideFareModel{
+		{
+			PackageSlug:       "suv",
+			TotalPriceInCents: 200,
+		},
+		{
+			PackageSlug:       "sedan",
+			TotalPriceInCents: 250,
+		},
+		{
+			PackageSlug:       "van",
+			TotalPriceInCents: 400,
+		},
+		{
+			PackageSlug:       "luxury",
+			TotalPriceInCents: 1000,
+		},
+	}
+}
