@@ -9,6 +9,7 @@ import (
 	"ride-sharing/services/trip-service/internal/domain"
 	tripTypes "ride-sharing/services/trip-service/pkg/types"
 	"ride-sharing/shared/env"
+	pb "ride-sharing/shared/proto/trip"
 	"ride-sharing/shared/types"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -28,8 +29,9 @@ func (s *service) CreateTrip(ctx context.Context, fare *domain.RideFareModel) (*
 	t := &domain.TripModel{
 		ID:       primitive.NewObjectID(),
 		UserID:   fare.UserID,
-		Status:   "PENDING",
+		Status:   "pending",
 		RideFare: fare,
+		Driver:   &pb.TripDriver{},
 	}
 
 	return s.repo.CreateTrip(ctx, t)
@@ -75,7 +77,7 @@ func (s *service) EstimatePackagesPriceWithRoute(route *tripTypes.OsrmApiRespons
 	return estimatedFares
 }
 
-func (s *service) GenerateTripFares(ctx context.Context, rideFares []*domain.RideFareModel, userID string) ([]*domain.RideFareModel, error) {
+func (s *service) GenerateTripFares(ctx context.Context, rideFares []*domain.RideFareModel, userID string, route *tripTypes.OsrmApiResponse) ([]*domain.RideFareModel, error) {
 	fares := make([]*domain.RideFareModel, len(rideFares))
 
 	for i, fare := range rideFares {
@@ -86,6 +88,7 @@ func (s *service) GenerateTripFares(ctx context.Context, rideFares []*domain.Rid
 			ID:                id,
 			TotalPriceInCents: fare.TotalPriceInCents,
 			PackageSlug:       fare.PackageSlug,
+			Route:             route,
 		}
 
 		if err := s.repo.SaveRideFare(ctx, fare); err != nil {
@@ -137,4 +140,22 @@ func getBaseFares() []*domain.RideFareModel {
 			TotalPriceInCents: 1000,
 		},
 	}
+}
+
+func (s *service) GetAndValidateFare(ctx context.Context, fareID string, userID string) (*domain.RideFareModel, error) {
+	fare, err := s.repo.GetRideFareByID(ctx, fareID)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to fetch fare by ID: %v", err)
+	}
+
+	if fare == nil {
+		return nil, fmt.Errorf("Fare does not exist")
+	}
+
+	// User fare validation (user is owner of this fare)
+	if userID != fare.UserID {
+		return nil, fmt.Errorf("Fare does not belong to the user")
+	}
+
+	return fare, nil
 }
