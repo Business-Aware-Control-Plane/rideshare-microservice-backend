@@ -2,12 +2,14 @@ package messaging
 
 import (
 	"fmt"
+	"log"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type RabbitMQ struct {
-	conn *amqp.Connection
+	conn    *amqp.Connection
+	Channel *amqp.Channel
 }
 
 func NewRabbitMQ(uri string) (*RabbitMQ, error) {
@@ -16,15 +18,47 @@ func NewRabbitMQ(uri string) (*RabbitMQ, error) {
 		return nil, fmt.Errorf("failed to connect to RabbitMQ: %v", err)
 	}
 
+	ch, err := conn.Channel()
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to open a channel: %v", err)
+	}
+
 	rmq := &RabbitMQ{
-		conn: conn,
+		conn:    conn,
+		Channel: ch,
+	}
+
+	if err := rmq.setupExchangesAndQueues(); err != nil {
+		// Cleanup if setup fails
+		rmq.Close()
+		return nil, fmt.Errorf("failed to setup exchanges and queues: %v", err)
 	}
 
 	return rmq, nil
 }
 
+func (r *RabbitMQ) setupExchangesAndQueues() error {
+	_, err := r.Channel.QueueDeclare(
+		"hello", // name
+		false,   // durable
+		false,   // delete when unused
+		false,   // exclusive
+		false,   // no-wait
+		nil,     // arguments
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return nil
+}
+
 func (r *RabbitMQ) Close() {
 	if r.conn != nil {
 		r.conn.Close()
+	}
+	if r.Channel != nil {
+		r.Channel.Close()
 	}
 }
