@@ -5,19 +5,16 @@ import (
 	"net/http"
 	grpcclients "ride-sharing/services/api-gateway/grpc_clients"
 	"ride-sharing/shared/contracts"
+	"ride-sharing/shared/messaging"
 	"ride-sharing/shared/proto/driver"
-
-	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
+var (
+	connManager = messaging.NewConnectionManager()
+)
 
 func HandleRidersWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := connManager.Upgrade(w, r)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
 		return
@@ -31,6 +28,10 @@ func HandleRidersWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Add connection to manager
+	connManager.Add(userId, conn)
+	defer connManager.Remove(userId)
+
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
@@ -43,7 +44,7 @@ func HandleRidersWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func HandleDriversWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := connManager.Upgrade(w, r)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
 		return
@@ -63,6 +64,9 @@ func HandleDriversWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Add connection to manager
+	connManager.Add(userId, conn)
+
 	ctx := r.Context()
 
 	driverService, err := grpcclients.NewDriverServiceClient()
@@ -72,6 +76,8 @@ func HandleDriversWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Closing connections
 	defer func() {
+		connManager.Remove(userId)
+
 		driverService.Client.UnregisterDriver(ctx, &driver.RegisterDriverRequest{
 			DriverID:    userId,
 			PackageSlug: packageSlug,
@@ -91,13 +97,11 @@ func HandleDriversWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg := contracts.WSMessage{
-		Type: "driver.cmd.register",
+	if err := connManager.SendMessage(userId, contracts.WSMessage{
+		Type: contracts.DriverCmdRegister,
 		Data: driverData.Driver,
-	}
-
-	if err := conn.WriteJSON(msg); err != nil {
-		log.Printf("Error Writing the Message: %v", err)
+	}); err != nil {
+		log.Printf("Error Sending Message: %v", err)
 		return
 	}
 
