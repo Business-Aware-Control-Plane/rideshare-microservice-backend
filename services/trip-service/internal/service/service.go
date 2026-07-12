@@ -9,6 +9,7 @@ import (
 	"ride-sharing/services/trip-service/internal/domain"
 	tripTypes "ride-sharing/services/trip-service/pkg/types"
 	"ride-sharing/shared/env"
+	pbd "ride-sharing/shared/proto/driver"
 	pb "ride-sharing/shared/proto/trip"
 	"ride-sharing/shared/types"
 
@@ -158,4 +159,12 @@ func (s *service) GetAndValidateFare(ctx context.Context, fareID string, userID 
 	}
 
 	return fare, nil
+}
+
+func (s *service) GetTripByID(ctx context.Context, id string) (*domain.TripModel, error) {
+	return s.repo.GetTripByID(ctx, id)
+}
+
+func (s *service) UpdateTrip(ctx context.Context, tripID string, status string, driver *pbd.Driver) error {
+	return s.repo.UpdateTrip(ctx, tripID, status, driver)
 }
