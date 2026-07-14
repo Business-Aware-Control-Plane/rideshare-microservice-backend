@@ -47,6 +47,11 @@ func main() {
 
 	mongoDb := db.GetDatabase(mongoClient, db.NewMongoDefaultConfig())
 
+	// Ensure TTL indexes exist for all collections
+	if err := db.EnsureIndexes(ctx, mongoDb); err != nil {
+		log.Fatalf("Failed to ensure MongoDB indexes: %v", err)
+	}
+
 	rabbitMqURI := env.GetString("RABBITMQ_URI", "amqp://guest:guest@localhost:5672/")
 
 	mongoDBRepo := repository.NewMongoRepository(mongoDb)

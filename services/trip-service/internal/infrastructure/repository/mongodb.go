@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"ride-sharing/services/trip-service/internal/domain"
 	"ride-sharing/shared/db"
@@ -22,6 +23,8 @@ func NewMongoRepository(db *mongo.Database) *mongoRepository {
 }
 
 func (r *mongoRepository) CreateTrip(ctx context.Context, trip *domain.TripModel) (*domain.TripModel, error) {
+	trip.CreatedAt = time.Now().UTC()
+
 	result, err := r.db.Collection(db.TripsCollection).InsertOne(ctx, trip)
 	if err != nil {
 		return nil, err
@@ -77,6 +80,8 @@ func (r *mongoRepository) UpdateTrip(ctx context.Context, tripID string, status 
 }
 
 func (r *mongoRepository) SaveRideFare(ctx context.Context, fare *domain.RideFareModel) error {
+	fare.CreatedAt = time.Now().UTC()
+
 	result, err := r.db.Collection(db.RideFaresCollection).InsertOne(ctx, fare)
 	if err != nil {
 		return err
