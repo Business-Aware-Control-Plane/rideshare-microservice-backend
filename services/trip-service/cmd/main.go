@@ -26,7 +26,7 @@ func main() {
 	tracerCfg := tracing.Config{
 		ServiceName:    "trip-service",
 		Environment:    env.GetString("ENVIRONMENT", "development"),
-		JaegerEndpoint: env.GetString("JAEGER_ENDPOINT", "http://jaeger:14268/api/traces"),
+		JaegerEndpoint: env.GetString("JAEGER_ENDPOINT", "http://jaeger:4318/v1/traces"),
 	}
 
 	sh, err := tracing.InitTracer(tracerCfg)
@@ -47,12 +47,10 @@ func main() {
 
 	mongoDb := db.GetDatabase(mongoClient, db.NewMongoDefaultConfig())
 
-	log.Printf(mongoDb.Name())
-
 	rabbitMqURI := env.GetString("RABBITMQ_URI", "amqp://guest:guest@localhost:5672/")
 
-	inmemRepo := repository.NewInmemRepository()
-	svc := service.NewService(inmemRepo)
+	mongoDBRepo := repository.NewMongoRepository(mongoDb)
+	svc := service.NewService(mongoDBRepo)
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)
