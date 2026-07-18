@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"ride-sharing/shared/db"
 	"ride-sharing/shared/env"
 	"ride-sharing/shared/messaging"
 	"ride-sharing/shared/tracing"
@@ -47,7 +48,15 @@ func main() {
 		log.Fatalf("Failed to Listen: %v", err)
 	}
 
-	service := NewService()
+	redisAddr := env.GetString("REDIS_ADDR", "localhost:6379")
+	redisPassword := env.GetString("REDIS_PASSWORD", "")
+	rdb, err := db.NewRedisClient(redisAddr, redisPassword)
+	if err != nil {
+		log.Fatalf("Failed to initialize Redis client: %v", err)
+	}
+	defer rdb.Close()
+
+	service := NewService(rdb)
 
 	// RabbitMQ connection
 	rabbitmq, err := messaging.NewRabbitMQ(rabbitMqURI)
