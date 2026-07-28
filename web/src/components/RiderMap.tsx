@@ -32,12 +32,23 @@ interface RiderMapProps {
     onRouteSelected?: (distance: number) => void;
 }
 
+const generateUUID = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+    });
+};
+
 export default function RiderMap({ onRouteSelected }: RiderMapProps) {
     const [trip, setTrip] = useState<TripPreview | null>(null)
     const [selectedCarPackage] = useState<RouteFare | null>(null)
     const [destination, setDestination] = useState<[number, number] | null>(null)
     const mapRef = useRef<L.Map>(null)
-    const userID = useMemo(() => crypto.randomUUID(), [])
+    const userID = useMemo(() => generateUUID(), [])
     const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const location = {

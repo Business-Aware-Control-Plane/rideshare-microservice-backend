@@ -38,24 +38,14 @@ func main() {
 	defer cancel()
 	defer sh(ctx)
 
-	// Initialize MongoDB
-	mongoClient, err := db.NewMongoClient(ctx, db.NewMongoDefaultConfig())
+	// Initialize PostgreSQL
+	gormDB, err := db.NewGormDB(db.NewPostgresDefaultConfig())
 	if err != nil {
-		log.Fatalf("Failed to initialize MongoDB, err: %v", err)
-	}
-	defer mongoClient.Disconnect(ctx)
-
-	mongoDb := db.GetDatabase(mongoClient, db.NewMongoDefaultConfig())
-
-	// Ensure TTL indexes exist for all collections
-	if err := db.EnsureIndexes(ctx, mongoDb); err != nil {
-		log.Fatalf("Failed to ensure MongoDB indexes: %v", err)
+		log.Fatalf("Failed to initialize PostgreSQL, err: %v", err)
 	}
 
-	rabbitMqURI := env.GetString("RABBITMQ_URI", "amqp://guest:guest@localhost:5672/")
-
-	mongoDBRepo := repository.NewMongoRepository(mongoDb)
-	svc := service.NewService(mongoDBRepo)
+	pgRepo := repository.NewPostgresRepository(gormDB)
+	svc := service.NewService(pgRepo)
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)
@@ -70,6 +60,7 @@ func main() {
 	}
 
 	// RabbitMQ connection
+	rabbitMqURI := env.GetString("RABBITMQ_URI", "amqp://guest:guest@localhost:5672/")
 	rabbitmq, err := messaging.NewRabbitMQ(rabbitMqURI)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
