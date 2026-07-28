@@ -5,9 +5,9 @@ import 'leaflet/dist/leaflet.css';
 // Fix for default marker icon
 import icon from 'leaflet/dist/images/marker-icon.png'
 import iconShadow from 'leaflet/dist/images/marker-shadow.png'
-import dynamic from 'next/dynamic'
+import dynamic from 'next/dynamic';
 import { Button } from "../components/ui/button";
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from 'next/navigation';
 import { CarPackageSlug } from '../types';
 import { DriverPackageSelector } from '../components/DriverPackageSelector';
@@ -35,6 +35,25 @@ function HomeContent() {
   const searchParams = useSearchParams()
   const payment = searchParams.get("payment")
   const [packageSlug, setPackageSlug] = useState<CarPackageSlug | null>(null)
+  const [countdown, setCountdown] = useState(5)
+
+  useEffect(() => {
+    if (payment === 'success') {
+      const timer = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            const targetUrl = process.env.NEXT_PUBLIC_BASE_URL || "/";
+            router.push(targetUrl);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+  }, [payment, router]);
 
   const handleClick = (userType: "driver" | "rider") => {
     setUserType(userType)
@@ -53,13 +72,19 @@ function HomeContent() {
               </div>
               <h1 className="text-2xl font-bold text-gray-900">Payment Successful!</h1>
               <p className="text-gray-600 mt-2">Your ride has been confirmed.</p>
+              <p className="text-sm text-gray-500 mt-4">
+                Redirecting to home in <span className="font-semibold text-primary">{countdown}s</span>...
+              </p>
             </div>
             <Button
               className="w-full text-lg py-6"
               variant="outline"
-              onClick={() => router.push("/")}
+              onClick={() => {
+                const targetUrl = process.env.NEXT_PUBLIC_BASE_URL || "/";
+                router.push(targetUrl);
+              }}
             >
-              Return Home
+              Return Home Now
             </Button>
           </div>
         </div>
