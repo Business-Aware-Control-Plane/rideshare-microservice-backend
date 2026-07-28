@@ -54,6 +54,14 @@ k3d image import \
 echo "=========================================="
 echo " Done! Triggering pod refresh in k3d..."
 echo "=========================================="
+if kubectl get secret postgres-cluster-app -n platform &>/dev/null; then
+  echo "Syncing CloudNativePG secret from 'platform' to 'rideshare' namespace..."
+  POSTGRES_URI=$(kubectl get secret postgres-cluster-app -n platform -o jsonpath='{.data.uri}' | base64 -d)
+  kubectl create secret generic postgres-cluster-app \
+    --from-literal=uri="${POSTGRES_URI}?sslmode=disable" \
+    -n rideshare --dry-run=client -o yaml | kubectl apply -f -
+fi
+
 kubectl rollout restart deployment -n rideshare
 
 echo "Check pod status with: kubectl get pods -n rideshare"
