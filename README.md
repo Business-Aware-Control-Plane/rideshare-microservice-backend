@@ -239,3 +239,30 @@ https://<IP_ADDRESS>
 Note: Since this is using a self-signed certificate, browsers will show a security warning. This is normal and expected. You can:
 Accept the warning in your browser (not recommended for production)
 Use a proper domain name (recommended for production)
+
+---
+
+## 8. CI/CD Pipeline & GitOps Automation
+
+This repository includes a production-grade **GitHub Actions CI/CD Pipeline** (`.github/workflows/ci-cd.yml`) designed for efficient container delivery to Docker Hub and automated GitOps deployment via ArgoCD.
+
+### Key Pipeline Capabilities:
+1. **Pull Request Workflow (`pull_request`)**:
+   - **Selective Change Detection**: Uses `dorny/paths-filter` to detect exactly which microservices changed in the PR.
+   - **Quality & Security Gates Only**: Runs tests, code compilation, local Docker image builds, and Trivy security scans ONLY for modified services.
+   - **No Registry / ArgoCD Side Effects**: Pushing to Docker Hub and updating GitOps manifests are **skipped** on PR branches so preview code does not alter ArgoCD environments.
+2. **Production Release Workflow (`push` to `main`/`master`)**:
+   - **Full Microservices Pipeline**: Triggers the complete pipeline across all microservices (`api-gateway`, `trip-service`, `driver-service`, `payment-service`, `web`).
+   - **Parallel Matrix Execution**: Builds and scans all container images concurrently using Docker Buildx and GitHub Actions layer caching.
+   - **Docker Hub Publishing**: Tags images with `${{ github.sha }}` and `latest` and publishes them to Docker Hub.
+   - **Automated GitOps & ArgoCD Sync**: Updates image tags in `gitops/clusters/development/values/applications/*.yaml` and `gitops/clusters/production/values/applications/*.yaml`, committing and pushing to trigger ArgoCD rolling updates automatically.
+
+### Required GitHub Secrets:
+Add the following secrets under **Settings -> Secrets and variables -> Actions** in this repository:
+
+| Secret Name | Description |
+|---|---|
+| `DOCKERHUB_USERNAME` | Your Docker Hub account username. |
+| `DOCKERHUB_TOKEN` | Personal Access Token generated from Docker Hub (Account Settings -> Security). |
+| `GITOPS_GITHUB_TOKEN` | GitHub Personal Access Token (PAT) with `repo` write permissions to commit changes to the `gitops` repository. |
+

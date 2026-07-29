@@ -1,0 +1,259 @@
+name: Microservices CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  detect-changes:
+    name: Detect Changed Microservices
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.set_services.outputs.services }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Filter Changed Paths (PRs only)
+        if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            api-gateway:
+              - 'services/api-gateway/**'
+              - 'infra/development/docker/api-gateway.Dockerfile'
+              - 'proto/**'
+              - 'shared/**'
+              - 'go.mod'
+              - 'go.sum'
+            trip-service:
+              - 'services/trip-service/**'
+              - 'infra/development/docker/trip-service.Dockerfile'
+              - 'proto/**'
+              - 'shared/**'
+              - 'go.mod'
+              - 'go.sum'
+            driver-service:
+              - 'services/driver-service/**'
+              - 'infra/development/docker/driver-service.Dockerfile'
+              - 'proto/**'
+              - 'shared/**'
+              - 'go.mod'
+              - 'go.sum'
+            payment-service:
+              - 'services/payment-service/**'
+              - 'infra/development/docker/payment-service.Dockerfile'
+              - 'proto/**'
+              - 'shared/**'
+              - 'go.mod'
+              - 'go.sum'
+            web:
+              - 'web/**'
+              - 'infra/development/docker/web.Dockerfile'
+
+      - name: Determine Target Services
+        id: set_services
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "PR event detected: running selective checks for changed services."
+            echo "services=${{ steps.filter.outputs.changes }}" >> $GITHUB_OUTPUT
+          else
+            echo "Push to main/master or workflow_dispatch detected: running complete production pipeline for all services."
+            echo 'services=["api-gateway","trip-service","driver-service","payment-service","web"]' >> $GITHUB_OUTPUT
+          fi
+
+  build-and-push:
+    name: Build & Push Service (${{ matrix.service }})
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.services != '[]' && needs.detect-changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # --- GO SERVICES BUILD & QUALITY GATE ---
+      - name: Setup Go
+        if: ${{ matrix.service != 'web' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Code Quality & Vet (Go)
+        if: ${{ matrix.service != 'web' }}
+        run: |
+          go vet ./...
+          go test -v ./...
+
+      - name: Compile Go Binary (api-gateway)
+        if: ${{ matrix.service == 'api-gateway' }}
+        run: |
+          mkdir -p build
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/api-gateway ./services/api-gateway
+
+      - name: Compile Go Binary (trip-service)
+        if: ${{ matrix.service == 'trip-service' }}
+        run: |
+          mkdir -p build
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/trip-service ./services/trip-service/cmd/main.go
+
+      - name: Compile Go Binary (driver-service)
+        if: ${{ matrix.service == 'driver-service' }}
+        run: |
+          mkdir -p build
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/driver-service ./services/driver-service
+
+      - name: Compile Go Binary (payment-service)
+        if: ${{ matrix.service == 'payment-service' }}
+        run: |
+          mkdir -p build
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/payment-service ./services/payment-service/cmd/main.go
+
+      # --- WEB SERVICE BUILD & QUALITY GATE ---
+      - name: Setup Node.js (Web)
+        if: ${{ matrix.service == 'web' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+
+      - name: Verify Web Build
+        if: ${{ matrix.service == 'web' }}
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      # --- DOCKER SETUP & SECURITY SCAN ---
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Determine Dockerfile Path
+        id: dockerfile_path
+        run: |
+          if [ "${{ matrix.service }}" = "web" ]; then
+            echo "path=./infra/development/docker/web.Dockerfile" >> $GITHUB_OUTPUT
+          else
+            echo "path=./infra/development/docker/${{ matrix.service }}.Dockerfile" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine Image Name
+        id: image_name
+        run: |
+          DOCKER_USER="${{ secrets.DOCKERHUB_USERNAME }}"
+          if [ -z "$DOCKER_USER" ]; then
+            DOCKER_USER="ride-sharing"
+          fi
+          echo "repo=${DOCKER_USER}/${{ matrix.service }}" >> $GITHUB_OUTPUT
+
+      - name: Build Local Image for Security Scan
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.dockerfile_path.outputs.path }}
+          load: true
+          tags: ${{ steps.image_name.outputs.repo }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.image_name.outputs.repo }}:${{ github.sha }}
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Build & Push Docker Image to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.dockerfile_path.outputs.path }}
+          push: true
+          tags: |
+            ${{ steps.image_name.outputs.repo }}:${{ github.sha }}
+            ${{ steps.image_name.outputs.repo }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  update-gitops:
+    name: Update GitOps Repository Manifests
+    needs: [detect-changes, build-and-push]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GitOps Repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'Business-Aware-Control-Plane/gitops'
+          token: ${{ secrets.GITOPS_GITHUB_TOKEN }}
+          path: 'gitops'
+
+      - name: Install yq
+        uses: mikefarah/yq@v4.44.1
+
+      - name: Update Service Tags in GitOps Values
+        run: |
+          DOCKER_USER="${{ secrets.DOCKERHUB_USERNAME }}"
+          if [ -z "$DOCKER_USER" ]; then
+            DOCKER_USER="ride-sharing"
+          fi
+          
+          SERVICES='${{ needs.detect-changes.outputs.services }}'
+          echo "Updating GitOps image tags for changed services: ${SERVICES}"
+          
+          # Parse JSON array of changed services
+          echo '${{ needs.detect-changes.outputs.services }}' | jq -r '.[]' | while read service; do
+            echo "Processing ${service}..."
+            
+            DEV_FILE="gitops/clusters/development/values/applications/${service}.yaml"
+            PROD_FILE="gitops/clusters/production/values/applications/${service}.yaml"
+            
+            if [ -f "$DEV_FILE" ]; then
+              yq eval -i ".image.repository = \"${DOCKER_USER}/${service}\"" "$DEV_FILE"
+              yq eval -i ".image.tag = \"${{ github.sha }}\"" "$DEV_FILE"
+              echo "Updated ${DEV_FILE}"
+            fi
+            
+            if [ -f "$PROD_FILE" ]; then
+              yq eval -i ".image.repository = \"${DOCKER_USER}/${service}\"" "$PROD_FILE"
+              yq eval -i ".image.tag = \"${{ github.sha }}\"" "$PROD_FILE"
+              echo "Updated ${PROD_FILE}"
+            fi
+          done
+
+      - name: Commit and Push GitOps Changes
+        run: |
+          cd gitops
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add clusters/
+          if git diff --staged --quiet; then
+            echo "No GitOps manifest changes to commit."
+          else
+            git commit -m "ci(gitops): update image tags to ${{ github.sha }} [skip ci]"
+            git pull --rebase origin main || git pull --rebase origin master || true
+            git push
+          fi
