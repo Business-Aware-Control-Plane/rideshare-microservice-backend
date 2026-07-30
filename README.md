@@ -1,4 +1,4 @@
-# "Microservices with Go" course project
+# FYP Project Ride Share Application for DEMO
 
 This is the starter code for the "Microservices with Go" project.
 
