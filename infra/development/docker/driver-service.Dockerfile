@@ -1,7 +1,12 @@
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+ARG TARGETOS TARGETARCH
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o build/driver-service ./services/driver-service
+
 FROM alpine
 WORKDIR /app
-
-ADD shared shared
-ADD build build
-
-ENTRYPOINT build/driver-service
+COPY --from=builder /app/build/driver-service /app/build/driver-service
+ENTRYPOINT ["/app/build/driver-service"]
